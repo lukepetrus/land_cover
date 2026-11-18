@@ -1,0 +1,15 @@
+---
+title: "land_cover_classification"
+format: html
+editor: visual
+---
+
+# Land Cover Classification
+
+The goal of this project is to play with land cover classification algorithms and gain more experience in building them.
+
+## Packages
+
+```{r}
+
+```
