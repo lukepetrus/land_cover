@@ -1,6 +1,6 @@
 ---
 title: "land_cover_classification"
-format: html
+format: gfm
 editor: visual
 ---
 
@@ -10,6 +10,111 @@ The goal of this project is to play with land cover classification algorithms an
 
 ## Packages
 
-```{r}
+```{r Packages}
+#| echo: True
+#| eval: True
+#| message: False
+#| warning: False
 
+library(tidyverse)
+library(rstac)
+library(terra)
+library(sf)
+
+```
+
+## Step 1: Get Some Data
+
+First order of business is to get myself some data to work with. To do this, I am going to use `rstac` to pull data from Microsoft Planetary Computer for the Gallatin Valley.
+
+This cell sets up the source and lists the available data sets from that source.
+
+```{r STAC_Source}
+#| echo: True
+#| eval: False
+
+# Set the source to Planetary Computer
+stac_source <- stac('https://planetarycomputer.microsoft.com/api/stac/v1/')
+
+# Set up a collections query
+collections_query <- collections(stac_source)
+
+# Execute the collections query
+PC_collections <- get_request(collections_query)
+
+# List the collections in human readable format
+PC_collections["collections"]
+
+# Data can also be browsed at this link https://planetarycomputer.microsoft.com/catalog
+```
+
+Now I need to decide on a data set. I think to start I am going to look at sentinel-2 data.
+
+```{r STAC_Search}
+#| echo: True
+#| eval: False
+
+# Define an area of interest over the Gallatin Valley
+aoi <- c(-110.8665, 45.6074, -111.2307, 45.8274)
+
+# Search for relevant imagery
+results <- stac_search(
+  q = stac_source,
+  collections = "sentinel-2-l2a",
+  bbox = aoi,
+  datetime = "2025-07-01/2025-07-10",
+  limit = 999
+) %>% 
+  get_request()
+```
+
+Now to download some imagery and see what we're working with.
+
+```{r STAC_Download}
+#| echo: True
+#| eval: False
+
+# Define the query I want to download after browsing the results list
+executed_stac_query <- stac_search(
+  q = stac_source,
+  collections = "sentinel-2-l2a",
+  ids = c("S2C_MSIL2A_20250708T181941_R127_T12TWR_20250708T232313",
+          "S2A_MSIL2A_20250707T181801_R084_T12TWR_20250708T010421")
+) %>% 
+  get_request()
+
+# Sign the query for rate-limiting purposes
+signed_stac_query <- items_sign(
+  executed_stac_query,
+  sign_planetary_computer()
+)
+
+# List of all the assets available for sentinel-2-l2a
+assets_list <- c("AOT", "B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B09", "B11", "B12", "B8A", "SCL", "WVP", "visual", "safe-manifest", "granule-metadata", "inspire-metadata", "product-metadata", "datastrip-metadata", "tilejson", "rendered_preview")
+
+# Download the assets
+assets_download(
+  items = signed_stac_query,
+  asset_names = assets_list,
+  output_dir = "~/remote_sensing/land_class/data",
+  overwrite = TRUE
+)
+
+```
+
+Beautiful, we now have some data. Let's plot it and see what it looks like.
+
+```{r Plot_The_Data}
+#| echo: True
+#| eval: True
+
+file_list1 <- list.files("./data/sentinel2-l2/12/T/WR/2025/07/07/S2A_MSIL2A_20250707T181801_N0511_R084_T12TWR_20250708T010421.SAFE/GRANULE/L2A_T12TWR_A052448_20250707T181804/IMG_DATA/R10m/", full.names = T)
+
+file_list2 <- list.files("./data/sentinel2-l2/12/T/WR/2025/07/08/S2C_MSIL2A_20250708T181941_N0511_R127_T12TWR_20250708T232313.SAFE/GRANULE/L2A_T12TWR_A004387_20250708T182843/IMG_DATA/R10m/", full.names = T)
+
+rgb1 <- rast(file_list1[2:4])
+
+rgb2 <- rast(file_list2[2:4])
+
+plotRGB(rgb2, stretch = "lin")
 ```
