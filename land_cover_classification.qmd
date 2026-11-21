@@ -20,7 +20,8 @@ library(tidyverse)
 library(rstac)
 library(terra)
 library(sf)
-
+library(mapedit)
+library(leaflet)
 ```
 
 ## Step 1: Get Some Data
@@ -108,13 +109,98 @@ Beautiful, we now have some data. Let's plot it and see what it looks like.
 #| echo: True
 #| eval: True
 
+# List file paths for first image set
 file_list1 <- list.files("./data/sentinel2-l2/12/T/WR/2025/07/07/S2A_MSIL2A_20250707T181801_N0511_R084_T12TWR_20250708T010421.SAFE/GRANULE/L2A_T12TWR_A052448_20250707T181804/IMG_DATA/R10m/", full.names = T)
 
+# List file paths for secpnd image set
 file_list2 <- list.files("./data/sentinel2-l2/12/T/WR/2025/07/08/S2C_MSIL2A_20250708T181941_N0511_R127_T12TWR_20250708T232313.SAFE/GRANULE/L2A_T12TWR_A004387_20250708T182843/IMG_DATA/R10m/", full.names = T)
 
+# Set first raster image
 rgb1 <- rast(file_list1[2:4])
 
+# Set second raster image
 rgb2 <- rast(file_list2[2:4])
 
-plotRGB(rgb2, stretch = "lin")
+# Set true color image for second raster
+tci <- rast(file_list2[6])
+
+# Plot 
+#plotRGB(rgb2, stretch = "lin")
+
+#plot(tci)
+```
+
+Okay, I like the look of rgb2 well enough to move forward with it to some unsupervised classification. I am going to attempt to run k-means classification on the entirety of this raster, although i may add in band 8 to give it more data to work with.
+
+```{r K_Means_5}
+#| echo: True
+#| eval: False
+
+# Set the seed to make the results reproducible
+set.seed(69)
+
+# Define the cluster raster with NIR
+cluster_buster <- rast(file_list2[2:5])
+
+# Run the k_means() functiion on it
+kmcluster <- k_means(cluster_buster, centers = 5)
+
+# View
+plot(kmcluster)
+
+# Save the raster
+writeRaster(kmcluster, "./products/k_means_5_centers_4_bands_10m.tif")
+```
+
+Not too shabby, but also not the world's most enlightening map. I have to wonder if it might not be more effective to reduce the number of potential classes. Let's run it again with only 3 clusters and see what that looks like.
+
+```{r K_Means_3}
+#| echo: True
+#| eval: False
+
+# Run the k_means() functiion
+kmcluster3 <- k_means(cluster_buster, centers = 3)
+
+# View
+plot(kmcluster3)
+
+# Save the raster
+writeRaster(kmcluster3, "./products/k_means_3_centers_4_bands_10m.tif")
+```
+
+Well, that's atrocious. 🤮 Clearly, 3 clusters is not enough. I doubt 7 clusters would make it better, either. Let's just move on to supervised classification.
+
+First step is to make some polygons I can sample for cal/val data. I tried resampling to a lower resolution so I could draw my land cover polygons directly on the satellite imagery I am using, but leaflet really doesn't like the size of my area of interest and I had to resample too much for it to be useful. There are ways around that, of course, but I am not sure they are worth the effort at the moment. The main goal was to be able to determine which fields specifically are irrigated vs unirrigated in my imagery.
+
+```{r Supe_Class}
+#| echo: True
+#| eval: True
+
+# Reproject the raster into WGS84 and get the extent
+raster_extent <- project(rgb2, "epsg:4326") %>% 
+  ext()
+
+# Convert the extent into a vector
+extent_vect <- vect(raster_extent) %>% 
+  set.crs("epsg:4326")
+
+# Sanity check
+plot(extent_vect)
+
+# True color image for reference
+plot(tci)
+
+# Define a leaflet map with the bbox of the raster
+draw_map <- leaflet() %>% 
+  addProviderTiles(provider = "Esri.WorldImagery") %>%
+  addPolygons(data = extent_vect, fill = F)
+
+# Draw some plots for cal/val data  
+irrigated_polygons <- drawFeatures(draw_map)
+rangeland_polygons <- drawFeatures(draw_map)
+alpine_polygons <- drawFeatures(draw_map)
+forest_polygons <- drawFeatures(draw_map)
+water_polygons <- drawFeatures(draw_map)
+
+
 ```
