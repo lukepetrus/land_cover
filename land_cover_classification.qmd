@@ -65,7 +65,7 @@ results <- stac_search(
   bbox = aoi,
   datetime = "2025-07-01/2025-07-10",
   limit = 999
-) %>% 
+  ) %>% 
   get_request()
 ```
 
@@ -81,7 +81,7 @@ executed_stac_query <- stac_search(
   collections = "sentinel-2-l2a",
   ids = c("S2C_MSIL2A_20250708T181941_R127_T12TWR_20250708T232313",
           "S2A_MSIL2A_20250707T181801_R084_T12TWR_20250708T010421")
-) %>% 
+  ) %>% 
   get_request()
 
 # Sign the query for rate-limiting purposes
@@ -118,8 +118,9 @@ file_list2 <- list.files("./data/sentinel2-l2/12/T/WR/2025/07/08/S2C_MSIL2A_2025
 # Set first raster image
 rgb1 <- rast(file_list1[2:4])
 
-# Set second raster image
-rgb2 <- rast(file_list2[2:4])
+# Set second raster image and reproject to WGS84
+rgb2 <- rast(file_list2[2:4]) %>% 
+  project("epsg:4326")
 
 # Set true color image for second raster
 tci <- rast(file_list2[6])
@@ -174,11 +175,10 @@ First step is to make some polygons I can sample for cal/val data. I tried resam
 
 ```{r Supe_Class}
 #| echo: True
-#| eval: True
+#| eval: False
 
 # Reproject the raster into WGS84 and get the extent
-raster_extent <- project(rgb2, "epsg:4326") %>% 
-  ext()
+raster_extent <- ext(rgb2)
 
 # Convert the extent into a vector
 extent_vect <- vect(raster_extent) %>% 
@@ -201,6 +201,98 @@ rangeland_polygons <- drawFeatures(draw_map)
 alpine_polygons <- drawFeatures(draw_map)
 forest_polygons <- drawFeatures(draw_map)
 water_polygons <- drawFeatures(draw_map)
+built_polygons <- drawFeatures(draw_map)
 
+# Put 'em in a list
+samps <- list(irrigated_polygons, rangeland_polygons, alpine_polygons, 
+     forest_polygons, water_polygons, built_polygons)
+
+# Make a matching list of land cover types
+samp_types <-list("irrigated", "rangeland", "alpine", 
+                  "forest", "water", "built")
+
+# Define a func to convert to SpatVector with a type column
+samp_vect_func <- function(polygon, lcover_type) {
+  polygon %>% 
+    mutate(type = lcover_type) %>% 
+    vect()
+}
+
+# Run the func
+samp_vect_list <- map2(samps, samp_types, samp_vect_func)
+
+# Create some lists for use in map()
+sample_polygons <- c(irrigated_polygons, rangeland_polygons, alpine_polygons, forest_polygons, water_polygons, built_polygons)
+sample_names <- c("irrigated_polygons", "rangeland_polygons", "alpine_polygons", "forest_polygons", "water_polygons", "built_polygons")
+
+
+# Write my sample polygons to disk
+map2(sample_polygons,
+     sample_names,
+     \(x, y) writeVector(x, 
+                         filename = paste0("./data/sample_polys/", y), 
+                         filetype = "KML", 
+                         overwrite = T)
+)
+
+# Check to make sure it worked
+billy_bob <- vect("./data/sample_polys/rangeland_polygons")
+
+draw_map %>% 
+  addPolygons(data = billy_bob)
+```
+
+Well, that last step was very messy and I'm sure if I thought about it for a bit I could find a way to do it iteratively with map() instead of hard coding all those mutates. But whatever, moving on!
+
+```{r Load_Samp_Polys}
+#| echo: True
+#| eval: True
+
+# Read in the sample polys as vectors
+samp_vect_list <- list.files("./data/sample_polys/", full.names = T) %>% 
+  map(vect)
+
+# Combine them into one vector
+samps <- reduce(samp_vect_list, rbind)
+
+# Sanity check
+plotRGB(rgb2, stretch = "linear")
+polys(samps)
+text(samps, samps$type)
+```
+
+Now let's sample some points from within these polygons.
+
+```{r Samp_Points}
+#| echo: True
+#| eval: True
+
+# Make reproducible
+set.seed(69)
+
+# Generate the points within the sample polygons
+samp_points <- spatSample(samps, 200, method = "random")
+
+# Sanity check
+plot(samp_points, "type")
+```
+
+Points are generated. Next step is to extract the reflectance values at each point.
+
+```{r Extract_Values}
+#| echo: True
+#| eval: True
+
+vals <- extract(rgb2, samp_points, method = "bilinear", ID = F)
+
+```
+
+Damnit. I am an idiot. A quarter or more of my `vals` are NA because I forgot to make sure that all my polygons actually fall on the raster. Significant numbers do not, so I need to go back and draw new polygons.
+
+```{r Boundaries}
+#| echo: True
+#| eval: True
+
+bounds <- boundaries(rgb2)
 
 ```
