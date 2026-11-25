@@ -22,6 +22,7 @@ library(terra)
 library(sf)
 library(mapedit)
 library(leaflet)
+library(rpart)
 ```
 
 ## Step 1: Get Some Data
@@ -124,11 +125,6 @@ rgb2 <- rast(file_list2[2:4]) %>%
 
 # Set true color image for second raster
 tci <- rast(file_list2[6])
-
-# Plot 
-#plotRGB(rgb2, stretch = "lin")
-
-#plot(tci)
 ```
 
 Okay, I like the look of rgb2 well enough to move forward with it to some unsupervised classification. I am going to attempt to run k-means classification on the entirety of this raster, although i may add in band 8 to give it more data to work with.
@@ -190,10 +186,14 @@ plot(extent_vect)
 # True color image for reference
 plot(tci)
 
+# Low res raster
+low_res <- aggregate(tci, 10, "mean")
+
 # Define a leaflet map with the bbox of the raster
 draw_map <- leaflet() %>% 
   addProviderTiles(provider = "Esri.WorldImagery") %>%
-  addPolygons(data = extent_vect, fill = F)
+  addPolygons(data = extent_vect, fill = F) %>% 
+  addRasterImage(low_res, opacity = 0.3)
 
 # Draw some plots for cal/val data  
 irrigated_polygons <- drawFeatures(draw_map)
@@ -221,14 +221,9 @@ samp_vect_func <- function(polygon, lcover_type) {
 # Run the func
 samp_vect_list <- map2(samps, samp_types, samp_vect_func)
 
-# Create some lists for use in map()
-sample_polygons <- c(irrigated_polygons, rangeland_polygons, alpine_polygons, forest_polygons, water_polygons, built_polygons)
-sample_names <- c("irrigated_polygons", "rangeland_polygons", "alpine_polygons", "forest_polygons", "water_polygons", "built_polygons")
-
-
 # Write my sample polygons to disk
-map2(sample_polygons,
-     sample_names,
+map2(samp_vect_list,
+     samp_types,
      \(x, y) writeVector(x, 
                          filename = paste0("./data/sample_polys/", y), 
                          filetype = "KML", 
@@ -236,13 +231,13 @@ map2(sample_polygons,
 )
 
 # Check to make sure it worked
-billy_bob <- vect("./data/sample_polys/rangeland_polygons")
+billy_bob <- vect("./data/sample_polys/rangeland")
 
 draw_map %>% 
   addPolygons(data = billy_bob)
 ```
 
-Well, that last step was very messy and I'm sure if I thought about it for a bit I could find a way to do it iteratively with map() instead of hard coding all those mutates. But whatever, moving on!
+Next step,
 
 ```{r Load_Samp_Polys}
 #| echo: True
@@ -256,8 +251,7 @@ samp_vect_list <- list.files("./data/sample_polys/", full.names = T) %>%
 samps <- reduce(samp_vect_list, rbind)
 
 # Sanity check
-plotRGB(rgb2, stretch = "linear")
-polys(samps)
+plot(samps)
 text(samps, samps$type)
 ```
 
@@ -283,16 +277,25 @@ Points are generated. Next step is to extract the reflectance values at each poi
 #| echo: True
 #| eval: True
 
+# Extract the values at each point
 vals <- extract(rgb2, samp_points, method = "bilinear", ID = F)
 
+# Combine the values with the class to create the final sample dataset
+samp_data <- data.frame(class = samp_points$type, vals)
 ```
 
-Damnit. I am an idiot. A quarter or more of my `vals` are NA because I forgot to make sure that all my polygons actually fall on the raster. Significant numbers do not, so I need to go back and draw new polygons.
+Now we fit a CART model to the data
 
-```{r Boundaries}
+```{r CART}
 #| echo: True
 #| eval: True
 
-bounds <- boundaries(rgb2)
+# Train the CART model
+cart_model <- rpart(as.factor(class)~., 
+                    data = samp_data, 
+                    method = "class", 
+                    minsplit = 5)
 
+plot(cart_model, uniform = T, main = "Classification Tree")
+text(cart_model, cex = 0.3)
 ```
